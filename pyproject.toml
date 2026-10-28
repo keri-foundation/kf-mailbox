@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kf-mailbox"
+version = "0.0.1"
+description = "KERI Foundation mailbox service for account-scoped store-and-forward"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "falcon>=4.0.2",
+    "hio>=0.7.19",
+    "keri @ git+https://github.com/WebOfTrust/keripy.git",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.11.0,<0.16",
+]
+
+[project.scripts]
+kf-mailbox = "kfmailbox.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["kfmailbox*"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

@@ -1,0 +1,9 @@
+.venv/
+
+# Commit uv.lock. It pins the resolved dependency set.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+var/
+*.egg-info/
+.idea/
