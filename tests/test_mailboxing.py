@@ -5,12 +5,13 @@ from falcon import testing
 from keri.app import habbing
 from keri.app.forwarding import StreamPoster
 from keri.core.eventing import exchange, messagize
+from keri.core.serdering import SerderKERI
 from keri.kering import Kinds, Roles, Schemes, Vrsn_2_0
 
 from kfmailbox.mailboxing import MailboxService
 
 
-def test_two_controllers_exchange_through_registered_mailbox(monkeypatch):
+def test_two_controllers_exchange_through_registered_mailbox():
     service = MailboxService(temp=True, host="127.0.0.1", port=6732)
     try:
         with habbing.openHab(name="sender", temp=True, version=Vrsn_2_0) as (hby, sender), \
@@ -32,6 +33,22 @@ def test_two_controllers_exchange_through_registered_mailbox(monkeypatch):
             assert oobi.headers["content-type"] == "application/cesr"
             assert service.hab.pre.encode() in oobi.content or len(oobi.content) > 0
 
+            public = testing.TestClient(service.publicApp)
+            path = f"/oobi/{receiver.pre}/mailbox/{service.hab.pre}"
+            assert public.simulate_get(path).status_code == 404
+            service.parser.parse(ims=bytearray(receiver.replay(gvrsn=Vrsn_2_0)), local=False)
+            assert public.simulate_get(path).status_code == 404
+            service.parser.parse(ims=receiver.makeEndRole(
+                eid=service.hab.pre, role=Roles.mailbox, version=Vrsn_2_0), local=False)
+            introduction = public.simulate_get(path)
+            assert introduction.status_code == 200
+            assert introduction.headers["content-type"] == "application/cesr"
+            hby.psr.parse(ims=bytearray(introduction.content), local=False)
+            assert sender.endsFor(receiver.pre)[Roles.mailbox][service.hab.pre][Schemes.http] == service.url
+            service.hby.kevers.pop(receiver.pre)
+            assert service.hby.db.states.get((receiver.pre,)) is not None
+            assert public.simulate_get(path).status_code == 200
+
             exn = exchange(
                 sender=sender.pre,
                 receiver=receiver.pre,
@@ -42,9 +59,6 @@ def test_two_controllers_exchange_through_registered_mailbox(monkeypatch):
                 gvrsn=Vrsn_2_0,
                 kind=Kinds.json,
             )
-            monkeypatch.setattr(sender, "endsFor", lambda pre: {
-                Roles.mailbox: {service.hab.pre: {Schemes.http: "http://127.0.0.1:6732"}},
-            })
             poster = StreamPoster(hby=hby, hab=sender, recp=receiver.pre, topic="credential", version=Vrsn_2_0)
             framed = messagize(exn, sigers=sender.sign(ser=exn.raw), framed=True, gvrsn=Vrsn_2_0)
             poster.send(serder=exn, attachment=bytes(framed[exn.size:]))
@@ -75,6 +89,9 @@ def test_two_controllers_exchange_through_registered_mailbox(monkeypatch):
                 gvrsn=Vrsn_2_0,
                 kind=Kinds.json,
             )
+            hby.psr.parse(ims=bytearray(outsider.replay(gvrsn=Vrsn_2_0)), local=False)
+            hby.psr.parse(ims=outsider.makeEndRole(
+                eid=service.hab.pre, role=Roles.mailbox, version=Vrsn_2_0), local=False)
             poster = StreamPoster(hby=hby, hab=sender, recp=outsider.pre, topic="credential", version=Vrsn_2_0)
             outsiderFramed = messagize(
                 outsiderExn,
@@ -98,6 +115,60 @@ def test_two_controllers_exchange_through_registered_mailbox(monkeypatch):
             removed = boot.simulate_delete(f"/mailboxes/{receiver.pre}")
             assert removed.status_code == 204
             assert not service.registrar.allowed(receiver.pre)
+            assert public.simulate_get(path).status_code == 404
+    finally:
+        service.close(clear=True)
+
+
+def test_recipient_oobi_requires_registered_signed_mailbox_authorization():
+    service = MailboxService(temp=True)
+    try:
+        with habbing.openHab(name="recipient", temp=True, version=Vrsn_2_0) as (_, recipient), \
+                habbing.openHab(name="other", temp=True, version=Vrsn_2_0) as (_, other):
+            public = testing.TestClient(service.publicApp)
+            path = f"/oobi/{recipient.pre}/mailbox/{service.hab.pre}"
+            service.parser.parse(ims=bytearray(recipient.replay(gvrsn=Vrsn_2_0)), local=False)
+            authorization = recipient.makeEndRole(
+                eid=service.hab.pre, role=Roles.mailbox, version=Vrsn_2_0)
+            reply = SerderKERI(raw=authorization)
+            forged = messagize(reply, sigers=other.sign(ser=reply.raw), gvrsn=Vrsn_2_0)
+            service.registrar.allow(recipient.pre)
+            service.parser.parse(ims=bytearray(forged), local=False)
+            assert public.simulate_get(path).status_code == 404
+            service.registrar.drop(recipient.pre)
+            service.parser.parse(ims=bytearray(authorization), local=False)
+            assert public.simulate_get(path).status_code == 404
+            service.registrar.allow(recipient.pre)
+            assert public.simulate_get(path).status_code == 200
+            assert public.simulate_get(f"/oobi/{recipient.pre}").status_code == 200
+            assert public.simulate_get(f"/oobi/{recipient.pre}/mailbox/{other.pre}").status_code == 404
+            assert public.simulate_get(f"/oobi/{recipient.pre}/controller").status_code == 404
+            service.parser.parse(ims=recipient.makeEndRole(
+                eid=service.hab.pre, role=Roles.mailbox, allow=False, version=Vrsn_2_0), local=False)
+            assert public.simulate_get(path).status_code == 404
+    finally:
+        service.close(clear=True)
+
+
+def test_recipient_oobi_waits_for_witness_receipts():
+    service = MailboxService(temp=True)
+    try:
+        with habbing.openHab(name="witness", temp=True, transferable=False,
+                             version=Vrsn_2_0) as (hby, witness):
+            recipient = hby.makeHab(name="witnessed-recipient", wits=[witness.pre],
+                                    toad=1, version=Vrsn_2_0)
+            service.registrar.allow(recipient.pre)
+            service.parser.parse(ims=bytearray(recipient.replay(gvrsn=Vrsn_2_0)), local=False)
+            authorization = recipient.makeEndRole(
+                eid=service.hab.pre, role=Roles.mailbox, version=Vrsn_2_0)
+            service.parser.parse(ims=bytearray(authorization), local=False)
+            public = testing.TestClient(service.publicApp)
+            path = f"/oobi/{recipient.pre}/mailbox/{service.hab.pre}"
+            assert public.simulate_get(path).status_code == 404
+            service.parser.parse(ims=witness.witness(recipient.kever.serder), local=False)
+            service.kvy.processEscrows()
+            service.parser.parse(ims=bytearray(authorization), local=False)
+            assert public.simulate_get(path).status_code == 200
     finally:
         service.close(clear=True)
 
