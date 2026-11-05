@@ -22,7 +22,7 @@ from keri.app import forwarding, habbing, storing
 from keri.app.indirecting import HttpEnd, createHttpServer
 from keri.core import coring, eventing, parsing
 from keri.db import dbing, koming
-from keri.end.ending import OOBIEnd
+from keri.end.ending import OOBI_AID_HEADER, OOBIEnd
 from keri.help import helping
 from keri.peer import exchanging
 
@@ -177,6 +177,41 @@ class HealthEnd:
         rep.status = falcon.HTTP_NO_CONTENT
 
 
+class MailboxOOBIEnd(OOBIEnd):
+    """Serve a registered recipient's signed authorization for this mailbox."""
+
+    def __init__(self, service):
+        super().__init__(hby=service.hby, default=service.hab.pre)
+        self.service = service
+
+    def on_get(self, req, rep, aid=None, role=None, eid=None):
+        if aid is None or aid in self.hby.prefixes:
+            return super().on_get(req, rep, aid=aid, role=role, eid=eid)
+
+        hab = self.service.hab
+        kever = self.hby.kevers[aid] if aid in self.hby.kevers else None
+        end = self.hby.db.ends.get(keys=(aid, kering.Roles.mailbox, hab.pre))
+        if (role not in (None, kering.Roles.mailbox)
+                or eid not in (None, hab.pre)
+                or not self.service.registrar.allowed(aid)
+                or kever is None or not self.hby.db.fullyWitnessed(kever.serder)
+                or end is None or not end.allowed):
+            raise falcon.HTTPNotFound(description="mailbox introduction is not available")
+
+        version = self.hby.version
+        stream = hab.replay(pre=aid, gvrsn=version)
+        for message in self.hby.db.cloneDelegation(kever, gvrsn=version):
+            stream.extend(message)
+        stream.extend(hab.replay(gvrsn=version))
+        stream.extend(hab.loadLocScheme(eid=hab.pre, gvrsn=version))
+        stream.extend(hab.loadEndRole(cid=aid, eid=hab.pre,
+                                      role=kering.Roles.mailbox, gvrsn=version))
+        rep.status = falcon.HTTP_200
+        rep.set_header(OOBI_AID_HEADER, aid)
+        rep.content_type = "application/cesr"
+        rep.data = bytes(stream)
+
+
 def publicUrl(scheme: str, host: str, port: int) -> str:
     if (scheme == kering.Schemes.http and port == 80) or (scheme == kering.Schemes.https and port == 443):
         return f"{scheme}://{host}"
@@ -247,7 +282,7 @@ class MailboxService(doing.DoDoer):
 
         self.publicApp = falcon.App()
         self.publicApp.add_route("/", self.httpEnd)
-        oobi = OOBIEnd(hby=self.hby, default=self.hab.pre)
+        oobi = MailboxOOBIEnd(self)
         self.publicApp.add_route("/oobi", oobi)
         self.publicApp.add_route("/oobi/{aid}", oobi)
         self.publicApp.add_route("/oobi/{aid}/{role}", oobi)

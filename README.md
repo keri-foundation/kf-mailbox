@@ -43,4 +43,6 @@ The call is idempotent for the same controller. `DELETE /mailboxes/{aid}` remove
 
 ## Wallet path
 
-After kf-boot onboarding, the session reply includes `mailbox.eid` and `mailbox.oobi`. Locksmith resolves the OOBI, anchors `Roles.mailbox` on the account AID, and polls that operator with `MailboxDirector`.
+After allocation, the wallet resolves the operator OOBI. It publishes the recipient's public key history and recipient-signed mailbox role to the public CESR endpoint. The operator must accept both before the recipient introduction is available.
+
+Share `/oobi/{recipient}/mailbox/{operator}` from the public URL. This returns the recipient's key history, the operator's signed location, and the recipient's signed mailbox authorization. Only registered recipients with an accepted mailbox authorization are served. Importing this introduction lets another wallet discover the delivery route without a separate mailbox registration step.
