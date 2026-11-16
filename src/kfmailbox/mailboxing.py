@@ -200,8 +200,6 @@ class MailboxOOBIEnd(OOBIEnd):
 
         version = self.hby.version
         stream = hab.replay(pre=aid, gvrsn=version)
-        for message in self.hby.db.cloneDelegation(kever, gvrsn=version):
-            stream.extend(message)
         stream.extend(hab.replay(gvrsn=version))
         stream.extend(hab.loadLocScheme(eid=hab.pre, gvrsn=version))
         stream.extend(hab.loadEndRole(cid=aid, eid=hab.pre,
